@@ -1,0 +1,40 @@
+[project]
+name = "dom-snapshot"
+version = "0.1.0"
+description = "dom-snapshot —— 从 CDP 客户端采集网页 DOM，经三源采集 + 五步过滤，产出给 LLM 看的文本树。"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "jason" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.5,<1.0",
+    "pytest>=8.0,<9.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dom_snapshot"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# 只管 Python 源码；markdown 文档里的代码块保留作者刻意排版，不被重排。
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["dom_snapshot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra -q"

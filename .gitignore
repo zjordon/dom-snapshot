@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# JetBrains IDE 个人配置（对齐 treeforge 约定）
+.idea/
+
+# ZCode 工具缓存（对齐 treeforge 约定）
+.zcode/
