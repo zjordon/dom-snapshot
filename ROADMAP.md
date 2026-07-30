@@ -77,7 +77,11 @@
 
 **目标**：TreeWalker 改为依赖 dom-snapshot，删除本地 5 文件，agent 行为不变。
 
-- [ ] dom-snapshot 发版 0.1.0（打 git tag，`pip install` 可用）
+- [x] dom-snapshot 发版 0.1.0（打 git tag，`pip install` 可用）
+      —— ✅ 已发版：tag `v0.1.0`（commit af378c2）已推送。干净 venv 验证 `pip install
+      "dom-snapshot @ git+https://github.com/zjordon/dom-snapshot.git@v0.1.0"` 成功，
+      import + 23 项 public API 全可用，且未装 cdp-use 也能运行（零硬依赖证实）。
+      下方 TreeWalker 改动项由 TreeWalker 工作空间的 agent 完成。
 - [ ] TreeWalker `pyproject.toml` 加 `dom-snapshot>=0.1.0` 依赖
 - [ ] TreeWalker 改 import：
       - `browser/session.py:22-30`：`from dom_snapshot import build_dom_state`
