@@ -104,21 +104,21 @@ def is_interactive(node) -> bool:
 
 **TreeWalker 现状**：`views.py` 同时含
 - DOM 快照核心（纯 dataclass）：`EnhancedDOMTreeNode` / `SimplifiedNode` / `SerializedDOMState` / `FileInputInfo` / `DOMRect` 等
-- 浏览器聚合状态（pydantic）：`BrowserStateSummary` / `TabInfo` / `BrowserEvent` / `DOMInteractedElement`
+- 浏览器聚合状态（pydantic）：`BrowserStateSummary` / `TabInfo` / `BrowserEvent`；外加一个 dataclass `DOMInteractedElement`（agent 运行时指纹概念，非 pydantic）
 
 **dom-snapshot 处理**：`views.py` 拆两半——
 - DOM 核心进 `dom_snapshot/models.py`（随库走，纯 dataclass，零 pydantic 依赖）
 - 聚合状态留在 TreeWalker 的 `browser/views.py`（这些是 agent 运行时概念，不属于快照库）
 
-**拆分清单**（需在抽取时精确执行）：
+**拆分清单**（已在 M2 抽取时精确执行并核实）：
 
 | 进 dom_snapshot/models.py | 留在 TreeWalker/browser/views.py |
 |---|---|
-| `DOMRect` | `BrowserStateSummary` |
-| `EnhancedAXProperty` / `EnhancedAXNode` | `TabInfo` |
-| `EnhancedSnapshotNode` | `BrowserEvent` |
-| `EnhancedDOMTreeNode` | `DOMInteractedElement` |
-| `SimplifiedNode` | |
+| `DOMRect` | `BrowserStateSummary`（pydantic） |
+| `EnhancedAXProperty` / `EnhancedAXNode` | `TabInfo`（pydantic） |
+| `EnhancedSnapshotNode` | `BrowserEvent`（pydantic） |
+| `EnhancedDOMTreeNode` | `DOMInteractedElement`（**dataclass**，非 pydantic——留此因是 agent 运行时指纹概念） |
+| `SimplifiedNode` | `MatchLevel`（Enum——历史 rerun.py 用） |
 | `PropagatingBounds` | |
 | `SerializedDOMState` | |
 | `FileInputInfo` | |
@@ -127,7 +127,11 @@ def is_interactive(node) -> bool:
 | `DOMCollectionConfig` / `DOMCollectionMetrics` | |
 | `DOMDegradationLevel` | |
 | `DEFAULT_INCLUDE_ATTRIBUTES` / `STATIC_ATTRIBUTES` | |
+| `DYNAMIC_CLASS_PATTERNS`（`filter_dynamic_classes` 依赖，不可漏） | |
 | `filter_dynamic_classes` | |
+
+> **M2.1 核实修正**：原清单漏列 `DYNAMIC_CLASS_PATTERNS`（`filter_dynamic_classes` 在 `views.py:194` 引用它，漏带会 `NameError`）
+> 和 `MatchLevel`（留 TreeWalker）；并澄清 `DOMInteractedElement` 是 `@dataclass` 而非 pydantic（位置对、理由错）。
 
 注意 `DOMInteractedElement`（locator.py 用它做指纹投影）虽然留 TreeWalker，但它 `load_from_enhanced_dom_tree`
 读的是 `EnhancedDOMTreeNode`——TreeWalker 端 import dom-snapshot 的 `EnhancedDOMTreeNode` 即可。
@@ -139,60 +143,81 @@ def is_interactive(node) -> bool:
 **dom-snapshot 处理**：定义 `CDPLikeClient` Protocol（鸭子类型），库本身用 `TYPE_CHECKING` 引用，
 不硬依赖 `cdp-use` 包。调用方传 cdp-use 客户端或任何兼容实现。
 
+> **M2.1 核实结论**：TreeWalker 的 `client.send` 是**属性链式**（`await client.send.DOM.getDocument(params, session_id=...)`），
+> 非参数式 `send(domain, method, params)`。`client.send` 是属性对象（cdp-use 的 `CDPLibrary`），含各 Domain 子对象，
+> 每个方法签名统一为 `async def m(self, params: dict | None = None, *, session_id: str | None = None) -> dict`。
+> 因此 Protocol 建模为**多级**：`CDPLikeClient.send: _CDPLibrary`，`_CDPLibrary` 聚合六个 Domain 子 Protocol
+> （DOM/DOMSnapshot/Accessibility/Runtime/Page/Target），每个含 collector.py 实际调用的 async 方法。
+
 ```python
-# dom_snapshot/_protocol.py
+# dom_snapshot/_protocol.py（简化示意，完整实现见源码）
 from __future__ import annotations
-from typing import Any, Awaitable, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from cdp_use import CDPClient  # 仅类型检查用，运行时不导入
 
 
 @runtime_checkable
+class _DOMDomain(Protocol):
+    async def getDocument(self, params: dict | None = None, *, session_id: str | None = None) -> dict: ...
+    async def describeNode(self, params: dict | None = None, *, session_id: str | None = None) -> dict: ...
+
+
+# ... _DOMSnapshotDomain / _AccessibilityDomain / _RuntimeDomain / _PageDomain / _TargetDomain 同理
+
+
+@runtime_checkable
+class _CDPLibrary(Protocol):
+    """client.send 的形状：聚合各 CDP Domain 子对象的库对象。"""
+    DOM: _DOMDomain
+    DOMSnapshot: _DOMSnapshotDomain
+    Accessibility: _AccessibilityDomain
+    Runtime: _RuntimeDomain
+    Page: _PageDomain
+    Target: _TargetDomain
+
+
+@runtime_checkable
 class CDPLikeClient(Protocol):
     """快照库唯一的外部依赖契约：一个能发 CDP 命令的客户端。
 
-    cdp-use 的 CDPClient 天然符合（client.send.<Domain>.<Method>(params, session_id=)）。
-    任何实现此 Protocol 的对象都可传入 build_dom_state。
+    cdp-use 的 CDPClient 天然符合——其 send 属性是 CDPLibrary，暴露六个 Domain 子对象。
+    runtime_checkable 使 isinstance(client, CDPLikeClient) 在运行时可用（测试 FakeClient 验证）。
     """
-
-    def send(
-        self,
-        domain: str,
-        method: str,
-        params: dict | None = None,
-        *,
-        session_id: str | None = None,
-    ) -> Awaitable[Any]:
-        """发送 CDP 命令，返回 awaitable 的响应字典。"""
-        ...
+    send: _CDPLibrary
 ```
 
-> **注意**：实际抽取时需确认 TreeWalker 的 `client.send` 调用形式（是 `client.send.DOM.getDocument(...)` 还是 `client.send("DOM", "getDocument", ...)`）。
-> 若是前者（属性链式），Protocol 要调整为暴露各 Domain 的属性对象。这是抽取第一步要核实的细节。
+方法参数用 `dict | None`（运行时 dom.py 传 dict），返回 `dict`——不绑定 cdp-use 的 typed Parameters 类，
+以保持"零硬依赖"目标。新增 CDP 调用时，在对应 Domain Protocol 补方法签名即可。
 
 ## 四、Public API
 
 ```python
-# dom_snapshot/__init__.py
+# dom_snapshot/__init__.py（实际导出 23 项，节选关键部分）
 from __future__ import annotations
-from ._protocol import CDPLikeClient
-from .collector import build_dom_state, EMPTY_DOM_STATE
-from .models import (
-    SerializedDOMState,
-    EnhancedDOMTreeNode,
-    SimplifiedNode,
-    FileInputInfo,
-    DOMRect,
-    DOMCollectionConfig,
-    DOMCollectionMetrics,
-    DOMDegradationLevel,
+from dom_snapshot._protocol import CDPLikeClient
+from dom_snapshot.collector import (
+    EMPTY_DOM_STATE,
+    attach_to_iframe_target,
+    build_dom_state,
+    build_frame_target_map,
+)
+from dom_snapshot.models import (
+    SerializedDOMState, EnhancedDOMTreeNode, SimplifiedNode, FileInputInfo,
+    DOMRect, DOMCollectionConfig, DOMCollectionMetrics, DOMDegradationLevel,
+    NodeType, PropagatingBounds, DOMSelectorMap,
+    DEFAULT_INCLUDE_ATTRIBUTES, STATIC_ATTRIBUTES, DYNAMIC_CLASS_PATTERNS,
+    EnhancedAXNode, EnhancedAXProperty, EnhancedSnapshotNode, filter_dynamic_classes,
 )
 
 __all__ = [
     # 主入口
     "build_dom_state",       # async (client, session_id, prev_map, cfg) -> (SerializedDOMState, DOMCollectionMetrics)
     "EMPTY_DOM_STATE",       # 采集失败的兜底空状态
+    # 跨源 iframe target 工具（public，供消费方 session 复用）
+    "build_frame_target_map",   # 构建 frameId/url → targetId 映射（原 dom.py 私有，M2 提为 public）
+    "attach_to_iframe_target",  # attach 到 iframe target，返回 sessionId
     # 数据模型
     "SerializedDOMState",    # 含 element_tree_text / selector_map / file_inputs_meta / page_stats
     "EnhancedDOMTreeNode",   # selector_map 的 value 类型（含 xpath/attributes/snapshot_node/ax_node）
@@ -202,10 +227,16 @@ __all__ = [
     "DOMCollectionConfig",   # 采集配置
     "DOMCollectionMetrics",  # 采集指标（各源耗时/节点数/降级级别）
     "DOMDegradationLevel",   # 降级级别枚举
+    "NodeType", "PropagatingBounds", "DOMSelectorMap",
+    "DEFAULT_INCLUDE_ATTRIBUTES", "STATIC_ATTRIBUTES", "DYNAMIC_CLASS_PATTERNS", "filter_dynamic_classes",
     # 协议
     "CDPLikeClient",         # CDP 客户端鸭子类型
 ]
 ```
+
+> **M2 决策补充**：原方案 iframe target 函数（`_build_frame_target_map` / `_attach_to_iframe_target`）
+> 在 collector.py 内部采集也用到，提为 public（去下划线）让消费方（TreeWalker session.py）复用，
+> 避免两仓库维护重复的 CDP Target 薄封装。
 
 **设计原则**：
 - 只暴露 `build_dom_state` 一个函数入口 + 数据模型 + Protocol

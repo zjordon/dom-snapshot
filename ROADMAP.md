@@ -14,7 +14,7 @@
 
 ---
 
-## M1 —— 仓库初始化与脚手架（当前）
+## M1 —— 仓库初始化与脚手架
 
 **目标**：搭好库的骨架，能 `pip install -e .` 本地开发。
 
@@ -23,7 +23,7 @@
 - [x] `pyproject.toml`：包名 `dom-snapshot`、模块 `dom_snapshot`、Python ≥3.11、dev 依赖（pytest/ruff）
 - [x] 目录骨架：`src/dom_snapshot/__init__.py`（空 public API）+ `tests/`
 - [x] `.gitignore` 补充 `.zcode/`（对齐 treeforge 约定）
-- [ ] 首次提交 + 推送（待用户授权提交）
+- [x] 首次提交 + 推送
 
 **验收**：`uv sync --extra dev` 成功；`uv run python -c "import dom_snapshot"` 不报错（即使内容空）。
 
@@ -35,35 +35,45 @@
 
 ### M2.1 依赖核实（抽取前的关键一步）
 
-- [ ] 核实 `client.send` 的调用形式：是 `client.send.DOM.getDocument(...)`（属性链式）
+- [x] 核实 `client.send` 的调用形式：是 `client.send.DOM.getDocument(...)`（属性链式）
       还是 `client.send("DOM", "getDocument", ...)`（参数式）？这决定 `CDPLikeClient` Protocol 的形状
-- [ ] 核实 `DOMInteractedElement.load_from_enhanced_dom_tree` 对 `EnhancedDOMTreeNode` 的字段依赖
+      —— **结论：属性链式**，Protocol 建模为多级（send → _CDPLibrary → 六个 Domain 子 Protocol）
+- [x] 核实 `DOMInteractedElement.load_from_enhanced_dom_tree` 对 `EnhancedDOMTreeNode` 的字段依赖
       （确认留在 TreeWalker 的聚合类型能正确读 dom-snapshot 的 DOM 模型）
-- [ ] 核实 TreeWalker `session.py:22-30` 对 dom.py 私有函数 `_attach_to_iframe_target` / `_build_frame_target_map` 的使用
-      （这两个要么提为 public API，要么 M3 时 session 端重新实现）
+      —— 9 个直接字段 + parent_node 链（xpath/hash/compute_stable_hash 间接读），全部保留进 models.py
+- [x] 核实 TreeWalker `session.py:22-30` 对 dom.py 私有函数 `_attach_to_iframe_target` / `_build_frame_target_map` 的使用
+      —— **结论：提为 public API**（去下划线），dom 内部采集也用，避免两仓库重复 CDP Target 薄封装
+
+> M2.1 核实详细结论见 `docs/p2/m2-extraction-plan.md`。额外发现 ARCHITECTURE 3 处偏差并已修正：
+> `DYNAMIC_CLASS_PATTERNS` 漏列（已补进 models.py）/ `MatchLevel` 漏列（留 TreeWalker）/ `DOMInteractedElement` 是 dataclass 非 pydantic。
 
 ### M2.2 逐文件迁移（按依赖顺序，从底向上）
 
-- [ ] `models.py`：从 TreeWalker `views.py` 拆出 DOM 核心 dataclass（见 ARCHITECTURE 第三节拆分清单）
+- [x] `models.py`：从 TreeWalker `views.py` 拆出 DOM 核心 dataclass（见 ARCHITECTURE 第三节拆分清单）
       —— **剥离 pydantic**，纯 dataclass
-- [ ] `cdp_timeout.py`：零改动迁移
-- [ ] `_protocol.py`：新建 `CDPLikeClient` Protocol（基于 M2.1 核实结果）
-- [ ] `paint_order.py`：仅 import 路径调整（`views.SimplifiedNode` → `models.SimplifiedNode`）
-- [ ] `interactive.py`：从 TreeWalker `dom.py:74-218` 抽出 `ClickableElementDetector` + `is_interactive`
+- [x] `cdp_timeout.py`：迁移（`CDPSourceStatus(str, Enum)` → `StrEnum`，ruff UP042 现代化）
+- [x] `_protocol.py`：新建 `CDPLikeClient` Protocol（完整多级：6 Domain 子 Protocol，基于 M2.1 核实结果）
+- [x] `paint_order.py`：仅 import 路径调整（`views.SimplifiedNode` → `models.SimplifiedNode`）
+- [x] `interactive.py`：从 TreeWalker `dom.py:74-218` 抽出 `ClickableElementDetector` + `is_interactive`
       （**破循环依赖**的关键）
-- [ ] `collector.py`：原 `dom.py`，调整 import（`views.*` → `models.*`，`cdp_use` → `_protocol`）
-- [ ] `serializer.py`：原 `serializer.py`，调整 import + 从 `interactive` 导入 `is_interactive`（不再懒导入 collector）
+- [x] `collector.py`：原 `dom.py`，调整 import（`views.*` → `models.*`，`cdp_use` → `_protocol`），
+      iframe 函数去下划线提 public，`asyncio.TimeoutError` → `TimeoutError`（ruff UP041）
+- [x] `serializer.py`：原 `serializer.py`，调整 import + 从 `interactive` 导入 `is_interactive`（不再懒导入 collector）
 
 ### M2.3 内部测试
 
-- [ ] 用录制的 CDP 响应 fixture 跑通 `build_dom_state` → `element_tree_text`
-- [ ] 抽取等价性验证：同输入下 dom-snapshot 产出 vs TreeWalker 原始产出一致
+- [x] 5 个测试文件（models/interactive/cdp_timeout/protocol/smoke_import）共 **90 项全过**
+- [x] 端到端：FakeClient 跑通 `build_dom_state` 全流程（三源采集 + 五步过滤 + 序列化）
+- [x] 抽取等价性验证：同输入下 dom-snapshot 产出 vs TreeWalker 原始产出一致
+      —— ✅ **已验证**：bilibili 投稿页三个页面状态（upload/publish/upload-cover）各跑一次，
+      dom-snapshot 与 TreeWalker 双方产出经 diff + MD5 三重核对 **byte-for-byte 完全一致**
+      （见 `D:\temp\dom-snapshot-model-input\bili` vs `D:\temp\tree-walker-model-input\bili`）
 
-**验收**：`uv run python -m pytest tests/` 通过；独立跑 `build_dom_state` 能产出格式正确的文本树。
+**验收**：`uv run python -m pytest tests/` 通过（90 项）；`import dom_snapshot` 无循环依赖；独立跑 `build_dom_state` 能产出 `SerializedDOMState`。
 
 ---
 
-## M3 —— TreeWalker 接入（跨工程改动）
+## M3 —— TreeWalker 接入（跨工程改动）（当前）
 
 **目标**：TreeWalker 改为依赖 dom-snapshot，删除本地 5 文件，agent 行为不变。
 
@@ -99,9 +109,9 @@
 
 | 阶段 | 交付物 | 状态 | 备注 |
 |---|---|---|---|
-| **M1** | 仓库脚手架（pyproject + 目录 + 文档） | ✅ | 脚手架完成，待首次提交 |
-| **M2** | 5 文件迁移 + 3 耦合点处理 + 内部测试 | ⏳ | 核心工作 |
-| **M3** | TreeWalker 接入（删本地 5 文件，全量测试） | ⏳ | 跨工程，需端到端验证 |
+| **M1** | 仓库脚手架（pyproject + 目录 + 文档） | ✅ | 已完成（commit b4b4df0） |
+| **M2** | 5 文件迁移 + 3 耦合点处理 + 内部测试 | ✅ | 已完成（90 项测试全过 + bilibili 真实页面等价性验证 byte-for-byte 一致） |
+| **M3** | TreeWalker 接入（删本地 5 文件，全量测试） | 🔄 | 当前，跨工程，需端到端验证 |
 | **M4** | treeforge 接入（可选） | ⏳ | P2.2 备用 |
 
 ---

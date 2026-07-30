@@ -222,3 +222,6 @@ __marimo__/
 
 # ZCode 工具缓存（对齐 treeforge 约定）
 .zcode/
+
+# 示例脚本运行产物（每次运行会覆盖，不入库）
+examples/_*.txt
