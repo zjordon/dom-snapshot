@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "dom-snapshot —— 从 CDP 客户端采集网页 DOM，经三源采集 + 五步过滤，产出给 LLM 看的文本树。"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "CC-BY-NC-4.0" }
 authors = [{ name = "jason" }]
 dependencies = []
 
