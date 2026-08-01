@@ -73,7 +73,7 @@
 
 ---
 
-## M3 —— TreeWalker 接入（跨工程改动）（当前）
+## M3 —— TreeWalker 接入（跨工程改动）
 
 **目标**：TreeWalker 改为依赖 dom-snapshot，删除本地 5 文件，agent 行为不变。
 
@@ -81,17 +81,18 @@
       —— ✅ 已发版：tag `v0.1.0`（commit af378c2）已推送。干净 venv 验证 `pip install
       "dom-snapshot @ git+https://github.com/zjordon/dom-snapshot.git@v0.1.0"` 成功，
       import + 23 项 public API 全可用，且未装 cdp-use 也能运行（零硬依赖证实）。
-      下方 TreeWalker 改动项由 TreeWalker 工作空间的 agent 完成。
-- [ ] TreeWalker `pyproject.toml` 加 `dom-snapshot>=0.1.0` 依赖
-- [ ] TreeWalker 改 import：
+- [x] TreeWalker `pyproject.toml` 加 `dom-snapshot>=0.1.0` 依赖
+- [x] TreeWalker 改 import：
       - `browser/session.py:22-30`：`from dom_snapshot import build_dom_state`
       - `agent/step.py` / `prompts/system_prompt.py` / `tools/actions.py` / `recorder/recorder.py`：
         `from tree_walker.browser.views import ...` → 从 `dom_snapshot` import DOM 类型 + 本地 import 聚合类型
       - `browser/views.py`：删 DOM 核心 dataclass（已迁走），保留聚合状态模型
       - `browser/__init__.py`：重导出调整
-- [ ] 处理 M2.1 核实的 `_attach_to_iframe_target` / `_build_frame_target_map`（提为 public 或 session 端重实现）
-- [ ] TreeWalker 全量测试
-- [ ] TreeWalker agent 端到端验证（跑一个真实任务，确认快照行为不变）
+- [x] 处理 M2.1 核实的 `_attach_to_iframe_target` / `_build_frame_target_map`
+      —— dom-snapshot 已提为 public（去下划线：`build_frame_target_map` / `attach_to_iframe_target`），
+      TreeWalker session.py 直接从 dom_snapshot 导入复用。
+- [x] TreeWalker 全量测试
+- [x] TreeWalker agent 端到端验证（跑一个真实任务，确认快照行为不变）
 
 **验收**：TreeWalker 所有测试通过；agent 跑 bilibili 投稿任务，DOM 快照与抽取前一致。
 **回滚**：若出问题，revert import 改动 + 恢复本地 5 文件。
@@ -102,8 +103,8 @@
 
 **目标**：treeforge 依赖 dom-snapshot（供采集层 `cdp_session.py` 使用）。
 
-- [ ] treeforge `pyproject.toml` 加 `dom-snapshot>=0.1.0`
-- [ ] `uv run python -c "from dom_snapshot import build_dom_state"` 不报错
+- [x] treeforge `pyproject.toml` 加 `dom-snapshot>=0.1.0`
+- [x] `uv run python -c "from dom_snapshot import build_dom_state"` 不报错
 
 **说明**：M4 可延后到 treeforge P2.2 真正开发采集层时再做。M1-M3 完成后 dom-snapshot 已可用。
 
@@ -115,8 +116,8 @@
 |---|---|---|---|
 | **M1** | 仓库脚手架（pyproject + 目录 + 文档） | ✅ | 已完成（commit b4b4df0） |
 | **M2** | 5 文件迁移 + 3 耦合点处理 + 内部测试 | ✅ | 已完成（90 项测试全过 + bilibili 真实页面等价性验证 byte-for-byte 一致） |
-| **M3** | TreeWalker 接入（删本地 5 文件，全量测试） | 🔄 | 当前，跨工程，需端到端验证 |
-| **M4** | treeforge 接入（可选） | ⏳ | P2.2 备用 |
+| **M3** | TreeWalker 接入（删本地 5 文件，全量测试） | ✅ | 已完成（TreeWalker 改 import + 删本地 5 文件 + 全量测试 + 端到端验证通过） |
+| **M4** | treeforge 接入（可选） | ✅ | 已完成（treeforge 加依赖 + import 验证通过） |
 
 ---
 
