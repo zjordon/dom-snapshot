@@ -12,6 +12,9 @@
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 from dom_snapshot._protocol import CDPLikeClient
 from dom_snapshot.collector import (
     EMPTY_DOM_STATE,
@@ -40,7 +43,12 @@ from dom_snapshot.models import (
     filter_dynamic_classes,
 )
 
-__version__ = "0.1.0"
+# 版本号读包元数据（pyproject 的 [project].version，单一事实来源），
+# 发版只改 pyproject 即可，不再需要同步本文件（v0.1.1 曾因此漏改）。
+try:
+    __version__ = _pkg_version("dom-snapshot")
+except PackageNotFoundError:  # 未安装（如直接从源码目录跑）的兜底
+    __version__ = "0.0.0"
 
 __all__ = [
     # 主入口
