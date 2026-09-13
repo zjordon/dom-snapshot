@@ -206,7 +206,8 @@ class DOMTreeSerializer:
         - DOCUMENT_NODE → 取第一个有效子节点作为根
         - DOCUMENT_FRAGMENT_NODE → 始终保留（Shadow DOM）
         - ELEMENT_NODE → 过滤禁用/SVG/排除标记后，按可见性保留
-        - TEXT_NODE → 可见 + 非空 + len > 1 时保留
+        - TEXT_NODE → 可见 + 非空 + 满足 _is_meaningful_text（多字符，或单字符
+          字母/数字含 CJK——装饰符 •/|/· 仍滤）时保留
         """
         # ── DOCUMENT_NODE: 透传，取第一个有效子节点 ──
         if node.node_type == NodeType.DOCUMENT_NODE:
