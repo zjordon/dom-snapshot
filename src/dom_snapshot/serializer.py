@@ -206,7 +206,8 @@ class DOMTreeSerializer:
         - DOCUMENT_NODE → 取第一个有效子节点作为根
         - DOCUMENT_FRAGMENT_NODE → 始终保留（Shadow DOM）
         - ELEMENT_NODE → 过滤禁用/SVG/排除标记后，按可见性保留
-        - TEXT_NODE → 可见 + 非空 + len > 1 时保留
+        - TEXT_NODE → 可见 + 非空 + 满足 _is_meaningful_text（多字符，或单字符
+          字母/数字含 CJK——装饰符 •/|/· 仍滤）时保留
         """
         # ── DOCUMENT_NODE: 透传，取第一个有效子节点 ──
         if node.node_type == NodeType.DOCUMENT_NODE:
@@ -236,12 +237,7 @@ class DOMTreeSerializer:
         # ── TEXT_NODE: 条件保留 ──
         if node.node_type == NodeType.TEXT_NODE:
             is_visible = node.snapshot_node is not None and node.is_visible
-            if (
-                is_visible
-                and node.node_value
-                and node.node_value.strip()
-                and len(node.node_value.strip()) > 1
-            ):
+            if is_visible and node.node_value and _is_meaningful_text(node.node_value):
                 return SimplifiedNode(original_node=node, children=[])
             return None
 
@@ -1066,8 +1062,7 @@ class DOMTreeSerializer:
             if (
                 is_visible
                 and node.original_node.node_value
-                and node.original_node.node_value.strip()
-                and len(node.original_node.node_value.strip()) > 1
+                and _is_meaningful_text(node.original_node.node_value)
             ):
                 parts.append(f"{indent}{node.original_node.node_value.strip()}")
 
@@ -1100,6 +1095,17 @@ class DOMTreeSerializer:
 
 
 # ── 模块级辅助函数 ──────────────────────────────────────────────────
+
+
+def _is_meaningful_text(value: str) -> bool:
+    """文本节点是否值得进入文本树。
+
+    单字符噪声过滤：多字符一律保留；单字符仅保留字母/数字（含 CJK，
+    Unicode isalnum），装饰符（•、|、· 等）仍滤——继承 browser-use 噪声
+    过滤意图，同时不再误杀个位数数值（issue #1）。
+    """
+    text = value.strip()
+    return len(text) > 1 or text.isalnum()
 
 
 def _safe_parse_number(value_str: str, default: float) -> float:
